@@ -1,0 +1,31 @@
+#cloud-config
+hostname: {{ hostname }}
+manage_etc_hosts: true
+
+users:
+  - name: tim
+    gecos: Tim Ansell
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    groups: adm, dialout, cdrom, sudo, audio, video, plugdev, games, users, input, render, netdev, gpio, i2c, spi
+    lock_passwd: true
+    ssh_authorized_keys:
+{% for key in ssh_keys %}
+      - {{ key }}
+{% endfor %}
+
+ssh:
+  install_server: true
+  emit_keys_to_console: false
+
+package_update: true
+package_upgrade: true
+packages:
+  - git
+  - build-essential
+  - dkms
+
+runcmd:
+  - git clone https://github.com/Seeed-Studio/seeed-linux-dtoverlays /opt/seeed-linux-dtoverlays
+  - cd /opt/seeed-linux-dtoverlays && sudo ./scripts/reTerminal.sh --keep-kernel
+  - reboot
