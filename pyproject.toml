@@ -1,0 +1,10 @@
+[project]
+name = "reterm"
+version = "0.1.0"
+description = "Reproducible setup for Seeed Studio reTerminal (CM4) devices"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "jinja2",
+    "requests",
+]
