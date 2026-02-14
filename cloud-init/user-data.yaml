@@ -6,6 +6,7 @@ manage_etc_hosts: true
 # because it doesn't consider packages/runcmd as "network requiring elements".
 # bootcmd runs on every boot (including after reboots) and applies the config.
 bootcmd:
+  - rfkill unblock wifi
   - netplan apply
 
 users:

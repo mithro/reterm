@@ -259,11 +259,22 @@ def configure_serial_consoles(mount_point: Path) -> None:
     config_content = result.stdout
     config_modified = False
 
-    # Enable GPIO UART
+    # Enable GPIO UART and free PL011 from Bluetooth — must be in [all] section
+    # (placing these before [all] or in a [cmX] section won't apply to all platforms)
+    all_section_additions = []
     if "enable_uart=1" not in config_content:
-        config_content = config_content.rstrip("\n") + "\nenable_uart=1\n"
-        config_modified = True
+        all_section_additions.append("enable_uart=1")
         print("    config.txt: added enable_uart=1")
+    if "dtoverlay=disable-bt" not in config_content:
+        all_section_additions.append("dtoverlay=disable-bt")
+        print("    config.txt: added dtoverlay=disable-bt")
+    if all_section_additions:
+        additions = "\n".join(all_section_additions) + "\n"
+        if "[all]" in config_content:
+            config_content = config_content.replace("[all]", "[all]\n" + additions)
+        else:
+            config_content = config_content.rstrip("\n") + "\n[all]\n" + additions
+        config_modified = True
 
     # Disable otg_mode=1 in [cm4] section (forces host mode, blocks gadget serial)
     if "otg_mode=1" in config_content and "#" not in config_content.split("otg_mode=1")[0].split("\n")[-1]:
