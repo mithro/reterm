@@ -2,6 +2,12 @@
 hostname: {{ hostname }}
 manage_etc_hosts: true
 
+# cloud-init generates netplan config but won't activate it (bringup=False)
+# because it doesn't consider packages/runcmd as "network requiring elements".
+# bootcmd runs on every boot (including after reboots) and applies the config.
+bootcmd:
+  - netplan apply
+
 users:
   - name: tim
     gecos: Tim Ansell
