@@ -250,24 +250,52 @@ def configure_usb_serial(mount_point: Path) -> None:
     """
     print("  Configuring USB serial console on USB-C port...")
 
-    # Add dtoverlay=dwc2 to config.txt (enables USB gadget mode)
+    # Modify config.txt for USB gadget mode on CM4
     config_txt = mount_point / "config.txt"
     result = subprocess.run(
         ["sudo", "cat", str(config_txt)],
         capture_output=True, text=True, check=True,
     )
     config_content = result.stdout
-    if "dtoverlay=dwc2" not in config_content:
+    config_modified = False
+
+    # Disable otg_mode=1 in [cm4] section (forces host mode, blocks gadget serial)
+    if "otg_mode=1" in config_content and "#" not in config_content.split("otg_mode=1")[0].split("\n")[-1]:
+        config_content = config_content.replace(
+            "otg_mode=1",
+            "# otg_mode=1  # disabled for USB gadget serial",
+        )
+        config_modified = True
+        print("    config.txt: commented out otg_mode=1")
+
+    # Add dtoverlay=dwc2 in [cm4] section if not already present there
+    # (the [cm5] section may have its own dwc2,dr_mode=host — that's separate)
+    cm4_section = config_content.split("[cm4]")
+    if len(cm4_section) > 1:
+        after_cm4 = cm4_section[1].split("[")[0]  # text between [cm4] and next section
+        if "dtoverlay=dwc2" not in after_cm4:
+            # Insert dtoverlay=dwc2 at the end of [cm4] section
+            config_content = config_content.replace(
+                "[cm4]" + cm4_section[1].split("[")[0],
+                "[cm4]" + cm4_section[1].split("[")[0].rstrip("\n") + "\ndtoverlay=dwc2\n\n",
+            )
+            config_modified = True
+            print("    config.txt: added dtoverlay=dwc2 in [cm4] section")
+    elif "dtoverlay=dwc2" not in config_content:
+        # No [cm4] section, add at end
         config_content = config_content.rstrip("\n") + "\ndtoverlay=dwc2\n"
+        config_modified = True
+        print("    config.txt: added dtoverlay=dwc2")
+
+    if config_modified:
         subprocess.run(
             ["sudo", "tee", str(config_txt)],
             input=config_content.encode(),
             stdout=subprocess.DEVNULL,
             check=True,
         )
-        print("    config.txt: added dtoverlay=dwc2")
     else:
-        print("    config.txt: dtoverlay=dwc2 already present")
+        print("    config.txt: USB gadget mode already configured")
 
     # Add modules-load and console to cmdline.txt
     cmdline_txt = mount_point / "cmdline.txt"
