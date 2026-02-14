@@ -12,6 +12,8 @@ eMMC as a USB mass storage device, and flashes the image with dd.
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -114,8 +116,17 @@ def main() -> None:
     print()
     print("5. Power on the reTerminal")
     print()
-    input("Press Enter when ready to continue...")
+    if sys.stdin.isatty():
+        input("Press Enter when ready to continue...")
+    else:
+        print("(non-interactive mode, continuing automatically)")
     print()
+
+    # Check rpiboot is installed before proceeding
+    if not shutil.which("rpiboot"):
+        print("ERROR: 'rpiboot' not found.", file=sys.stderr)
+        print("Install it with: sudo apt install rpiboot", file=sys.stderr)
+        sys.exit(1)
 
     # Snapshot current devices before rpiboot
     known_devices = get_block_devices()
@@ -127,10 +138,6 @@ def main() -> None:
             ["sudo", "rpiboot", "-d", "mass-storage-gadget"],
             check=True,
         )
-    except FileNotFoundError:
-        print("ERROR: 'rpiboot' not found.", file=sys.stderr)
-        print("Install it with: sudo apt install rpiboot", file=sys.stderr)
-        sys.exit(1)
     except subprocess.CalledProcessError as e:
         print(f"ERROR: rpiboot failed with exit code {e.returncode}", file=sys.stderr)
         sys.exit(1)
@@ -144,10 +151,15 @@ def main() -> None:
     print(f"Detected new device:")
     print(get_device_info(device))
     print()
-    confirm = input(f"Flash {img_path.name} to {device}? This will ERASE ALL DATA. [y/N] ")
-    if confirm.lower() != "y":
-        print("Aborted.")
-        sys.exit(0)
+    if sys.stdin.isatty():
+        confirm = input(f"Flash {img_path.name} to {device}? This will ERASE ALL DATA. [y/N] ")
+        if confirm.lower() != "y":
+            print("Aborted.")
+            sys.exit(0)
+    else:
+        print(f"WARNING: Non-interactive mode. Refusing to flash without confirmation.", file=sys.stderr)
+        print(f"Run interactively in a terminal to flash.", file=sys.stderr)
+        sys.exit(1)
 
     # Flash the image
     print()
