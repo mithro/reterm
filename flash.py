@@ -135,7 +135,7 @@ def main() -> None:
     print("Running rpiboot to expose eMMC as USB mass storage...")
     try:
         subprocess.run(
-            ["sudo", "rpiboot", "-d", "mass-storage-gadget"],
+            ["sudo", "rpiboot"],
             check=True,
         )
     except subprocess.CalledProcessError as e:
