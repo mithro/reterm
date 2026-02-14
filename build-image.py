@@ -268,24 +268,34 @@ def configure_usb_serial(mount_point: Path) -> None:
         config_modified = True
         print("    config.txt: commented out otg_mode=1")
 
-    # Add dtoverlay=dwc2 in [cm4] section if not already present there
+    # Add dtoverlay=dwc2,dr_mode=peripheral in [cm4] section if not already present
+    # CM4 has no USB ID pin, so OTG auto-detection won't work — must force peripheral mode
     # (the [cm5] section may have its own dwc2,dr_mode=host — that's separate)
     cm4_section = config_content.split("[cm4]")
     if len(cm4_section) > 1:
         after_cm4 = cm4_section[1].split("[")[0]  # text between [cm4] and next section
         if "dtoverlay=dwc2" not in after_cm4:
-            # Insert dtoverlay=dwc2 at the end of [cm4] section
+            # Insert dtoverlay=dwc2,dr_mode=peripheral at the end of [cm4] section
             config_content = config_content.replace(
                 "[cm4]" + cm4_section[1].split("[")[0],
-                "[cm4]" + cm4_section[1].split("[")[0].rstrip("\n") + "\ndtoverlay=dwc2\n\n",
+                "[cm4]" + cm4_section[1].split("[")[0].rstrip("\n") + "\ndtoverlay=dwc2,dr_mode=peripheral\n\n",
             )
             config_modified = True
-            print("    config.txt: added dtoverlay=dwc2 in [cm4] section")
+            print("    config.txt: added dtoverlay=dwc2,dr_mode=peripheral in [cm4] section")
+        elif "dtoverlay=dwc2" in after_cm4 and "dr_mode=peripheral" not in after_cm4:
+            # dwc2 present but without peripheral mode — fix it
+            config_content = config_content.replace(
+                "dtoverlay=dwc2",
+                "dtoverlay=dwc2,dr_mode=peripheral",
+                1,  # only replace first occurrence (in [cm4] section)
+            )
+            config_modified = True
+            print("    config.txt: updated dtoverlay=dwc2 to include dr_mode=peripheral")
     elif "dtoverlay=dwc2" not in config_content:
         # No [cm4] section, add at end
-        config_content = config_content.rstrip("\n") + "\ndtoverlay=dwc2\n"
+        config_content = config_content.rstrip("\n") + "\ndtoverlay=dwc2,dr_mode=peripheral\n"
         config_modified = True
-        print("    config.txt: added dtoverlay=dwc2")
+        print("    config.txt: added dtoverlay=dwc2,dr_mode=peripheral")
 
     if config_modified:
         subprocess.run(
