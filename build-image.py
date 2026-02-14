@@ -241,6 +241,64 @@ def render_cloud_init(hostname: str, wifi_psk: str, ssh_keys: list[str]) -> dict
     return rendered
 
 
+def configure_usb_serial(mount_point: Path) -> None:
+    """Enable USB serial console (gadget mode) on the USB-C port.
+
+    Modifies config.txt and cmdline.txt on the boot partition to enable
+    the dwc2 USB controller in gadget mode with serial console output.
+    This allows connecting to the reTerminal's serial console via USB-C.
+    """
+    print("  Configuring USB serial console on USB-C port...")
+
+    # Add dtoverlay=dwc2 to config.txt (enables USB gadget mode)
+    config_txt = mount_point / "config.txt"
+    result = subprocess.run(
+        ["sudo", "cat", str(config_txt)],
+        capture_output=True, text=True, check=True,
+    )
+    config_content = result.stdout
+    if "dtoverlay=dwc2" not in config_content:
+        config_content = config_content.rstrip("\n") + "\ndtoverlay=dwc2\n"
+        subprocess.run(
+            ["sudo", "tee", str(config_txt)],
+            input=config_content.encode(),
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+        print("    config.txt: added dtoverlay=dwc2")
+    else:
+        print("    config.txt: dtoverlay=dwc2 already present")
+
+    # Add modules-load and console to cmdline.txt
+    cmdline_txt = mount_point / "cmdline.txt"
+    result = subprocess.run(
+        ["sudo", "cat", str(cmdline_txt)],
+        capture_output=True, text=True, check=True,
+    )
+    cmdline = result.stdout.strip()
+    modified = False
+
+    if "modules-load=" not in cmdline:
+        cmdline += " modules-load=dwc2,g_serial"
+        modified = True
+        print("    cmdline.txt: added modules-load=dwc2,g_serial")
+
+    if "console=ttyGS0" not in cmdline:
+        cmdline += " console=ttyGS0,115200"
+        modified = True
+        print("    cmdline.txt: added console=ttyGS0,115200")
+
+    if modified:
+        subprocess.run(
+            ["sudo", "tee", str(cmdline_txt)],
+            input=(cmdline + "\n").encode(),
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+    else:
+        print("    cmdline.txt: USB serial already configured")
+
+
 def inject_cloud_init(img_path: Path, rendered_files: dict[str, str]) -> None:
     """Mount the boot partition and write cloud-init files."""
     offset = find_boot_partition_offset(img_path)
@@ -272,6 +330,9 @@ def inject_cloud_init(img_path: Path, rendered_files: dict[str, str]) -> None:
             )
 
         print("  Cloud-init files written successfully")
+
+        # Enable USB serial console (dwc2 gadget mode on USB-C port)
+        configure_usb_serial(mount_point)
 
     finally:
         print(f"Unmounting {mount_point}")

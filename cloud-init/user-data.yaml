@@ -26,6 +26,7 @@ packages:
   - dkms
 
 runcmd:
+  - systemctl enable --now getty@ttyGS0.service
   - git clone https://github.com/Seeed-Studio/seeed-linux-dtoverlays /opt/seeed-linux-dtoverlays
   - cd /opt/seeed-linux-dtoverlays && sudo ./scripts/reTerminal.sh --keep-kernel
   - reboot
