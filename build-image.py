@@ -241,16 +241,16 @@ def render_cloud_init(hostname: str, wifi_psk: str, ssh_keys: list[str]) -> dict
     return rendered
 
 
-def configure_usb_serial(mount_point: Path) -> None:
-    """Enable USB serial console (gadget mode) on the USB-C port.
+def configure_serial_consoles(mount_point: Path) -> None:
+    """Enable serial consoles: GPIO UART and USB-C gadget mode.
 
-    Modifies config.txt and cmdline.txt on the boot partition to enable
-    the dwc2 USB controller in gadget mode with serial console output.
-    This allows connecting to the reTerminal's serial console via USB-C.
+    Modifies config.txt and cmdline.txt on the boot partition to enable:
+    1. GPIO UART (serial0) on pins 8/10 for debug via USB-to-TTL adapter
+    2. USB-C gadget serial (ttyGS0) via dwc2 peripheral mode
     """
-    print("  Configuring USB serial console on USB-C port...")
+    print("  Configuring serial consoles...")
 
-    # Modify config.txt for USB gadget mode on CM4
+    # --- config.txt modifications ---
     config_txt = mount_point / "config.txt"
     result = subprocess.run(
         ["sudo", "cat", str(config_txt)],
@@ -258,6 +258,12 @@ def configure_usb_serial(mount_point: Path) -> None:
     )
     config_content = result.stdout
     config_modified = False
+
+    # Enable GPIO UART
+    if "enable_uart=1" not in config_content:
+        config_content = config_content.rstrip("\n") + "\nenable_uart=1\n"
+        config_modified = True
+        print("    config.txt: added enable_uart=1")
 
     # Disable otg_mode=1 in [cm4] section (forces host mode, blocks gadget serial)
     if "otg_mode=1" in config_content and "#" not in config_content.split("otg_mode=1")[0].split("\n")[-1]:
@@ -275,7 +281,6 @@ def configure_usb_serial(mount_point: Path) -> None:
     if len(cm4_section) > 1:
         after_cm4 = cm4_section[1].split("[")[0]  # text between [cm4] and next section
         if "dtoverlay=dwc2" not in after_cm4:
-            # Insert dtoverlay=dwc2,dr_mode=peripheral at the end of [cm4] section
             config_content = config_content.replace(
                 "[cm4]" + cm4_section[1].split("[")[0],
                 "[cm4]" + cm4_section[1].split("[")[0].rstrip("\n") + "\ndtoverlay=dwc2,dr_mode=peripheral\n\n",
@@ -283,16 +288,14 @@ def configure_usb_serial(mount_point: Path) -> None:
             config_modified = True
             print("    config.txt: added dtoverlay=dwc2,dr_mode=peripheral in [cm4] section")
         elif "dtoverlay=dwc2" in after_cm4 and "dr_mode=peripheral" not in after_cm4:
-            # dwc2 present but without peripheral mode — fix it
             config_content = config_content.replace(
                 "dtoverlay=dwc2",
                 "dtoverlay=dwc2,dr_mode=peripheral",
-                1,  # only replace first occurrence (in [cm4] section)
+                1,
             )
             config_modified = True
             print("    config.txt: updated dtoverlay=dwc2 to include dr_mode=peripheral")
     elif "dtoverlay=dwc2" not in config_content:
-        # No [cm4] section, add at end
         config_content = config_content.rstrip("\n") + "\ndtoverlay=dwc2,dr_mode=peripheral\n"
         config_modified = True
         print("    config.txt: added dtoverlay=dwc2,dr_mode=peripheral")
@@ -304,10 +307,8 @@ def configure_usb_serial(mount_point: Path) -> None:
             stdout=subprocess.DEVNULL,
             check=True,
         )
-    else:
-        print("    config.txt: USB gadget mode already configured")
 
-    # Add modules-load and console to cmdline.txt
+    # --- cmdline.txt modifications ---
     cmdline_txt = mount_point / "cmdline.txt"
     result = subprocess.run(
         ["sudo", "cat", str(cmdline_txt)],
@@ -316,6 +317,13 @@ def configure_usb_serial(mount_point: Path) -> None:
     cmdline = result.stdout.strip()
     modified = False
 
+    # GPIO UART console
+    if "console=serial0" not in cmdline:
+        cmdline += " console=serial0,115200"
+        modified = True
+        print("    cmdline.txt: added console=serial0,115200")
+
+    # USB gadget serial
     if "modules-load=" not in cmdline:
         cmdline += " modules-load=dwc2,g_serial"
         modified = True
@@ -333,8 +341,6 @@ def configure_usb_serial(mount_point: Path) -> None:
             stdout=subprocess.DEVNULL,
             check=True,
         )
-    else:
-        print("    cmdline.txt: USB serial already configured")
 
 
 def inject_cloud_init(img_path: Path, rendered_files: dict[str, str]) -> None:
@@ -367,10 +373,19 @@ def inject_cloud_init(img_path: Path, rendered_files: dict[str, str]) -> None:
                 check=True,
             )
 
+        # Create empty 'ssh' file to enable SSH on RPi OS
+        # (RPi OS doesn't start sshd without this, regardless of cloud-init)
+        ssh_file = mount_point / "ssh"
+        print("  Writing ssh (enable SSH)")
+        subprocess.run(
+            ["sudo", "touch", str(ssh_file)],
+            check=True,
+        )
+
         print("  Cloud-init files written successfully")
 
-        # Enable USB serial console (dwc2 gadget mode on USB-C port)
-        configure_usb_serial(mount_point)
+        # Enable serial consoles (GPIO UART + USB-C gadget)
+        configure_serial_consoles(mount_point)
 
     finally:
         print(f"Unmounting {mount_point}")
