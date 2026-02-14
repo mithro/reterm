@@ -2,7 +2,6 @@ network:
   version: 2
   wifis:
     wlan0:
-      optional: true
       dhcp4: true
       dhcp6: true
       access-points:
