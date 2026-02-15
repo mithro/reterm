@@ -2,10 +2,8 @@
 hostname: {{ hostname }}
 manage_etc_hosts: true
 
-# cloud-init generates netplan config but won't activate it (bringup=False)
-# because it doesn't consider packages/runcmd as "network requiring elements".
-# bootcmd runs on every boot (including after reboots) and applies the config.
-# We wait for an IP on wlan0 before returning so that package install has network.
+# cloud-init generates netplan config but won't activate it on boot.
+# bootcmd runs on every boot and applies WiFi config.
 bootcmd:
   - rfkill unblock wifi
   - netplan apply
@@ -26,15 +24,3 @@ users:
 {% for key in ssh_keys %}
       - {{ key }}
 {% endfor %}
-
-package_update: true
-package_upgrade: true
-packages:
-  - git
-  - build-essential
-  - dkms
-
-runcmd:
-  - systemctl enable --now getty@ttyGS0.service
-  - git clone https://github.com/Seeed-Studio/seeed-linux-dtoverlays /opt/seeed-linux-dtoverlays
-  - cd /opt/seeed-linux-dtoverlays && sudo ./scripts/reTerminal.sh --keep-kernel && reboot
