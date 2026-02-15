@@ -629,7 +629,13 @@ def teardown_chroot(rootfs: Path) -> None:
     # Unmount in reverse order
     for d in ["boot/firmware", "dev/pts", "dev", "sys", "proc"]:
         target = rootfs / d
-        subprocess.run(["sudo", "umount", str(target)], check=False)
+        result = subprocess.run(
+            ["sudo", "umount", str(target)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            print(f"    WARNING: Failed to unmount {d}: {result.stderr.strip()}",
+                  file=sys.stderr)
 
     print("    Unmounted chroot bind mounts")
 
