@@ -1,0 +1,34 @@
+name: Build reTerminal Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64 chroot
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y parted e2fsprogs
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build generic image
+        run: sudo -E uv run build-image.py
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reterminal-image
+          path: |
+            output/reterminal-base.img.xz
+            output/reterminal-base.img.xz.sha256
