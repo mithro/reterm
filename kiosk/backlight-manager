@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Backlight manager for reTerminal.
+
+Reads ambient light sensor and adjusts backlight brightness.
+When dark, turns screen off. Button press wakes screen for 5 minutes.
+
+Hysteresis prevents oscillation near the dark threshold: the screen's own
+backlight affects the ambient sensor, so we use a lower threshold to turn
+off (must be genuinely dark) and a higher threshold to turn on.
+"""
+import glob
+import os
+import select
+import signal
+import struct
+import sys
+import time
+
+# Hardware paths
+LIGHT_SENSOR = "/sys/bus/iio/devices/iio:device0/in_illuminance_input"
+BACKLIGHT = "/sys/class/backlight/1-0045/brightness"
+
+# Thresholds: screen turns off below 4 lux, back on above 4 lux.
+# 3-reading smoothing window prevents oscillation at the boundary.
+DARK_OFF_THRESHOLD = 4     # lux - below this, turn screen off
+DARK_ON_THRESHOLD = 4      # lux - above this, turn screen back on
+MIN_BRIGHTNESS = 50        # minimum brightness when screen is on
+MAX_BRIGHTNESS = 255       # maximum brightness
+LUX_MAX = 500              # lux value that maps to MAX_BRIGHTNESS
+WAKE_BRIGHTNESS = 200      # brightness during button-wake
+WAKE_DURATION = 300        # seconds to keep screen on after button press
+POLL_INTERVAL = 2          # seconds between sensor reads
+SMOOTHING_WINDOW = 3       # number of readings to average
+
+# Linux input event format (arm64): timeval{long,long} + u16 type + u16 code + s32 value
+EVENT_FORMAT = "llHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+EV_KEY = 0x01
+
+
+def find_gpio_keys_device():
+    """Find the input event device for gpio_keys by name."""
+    for name_path in glob.glob("/sys/class/input/event*/device/name"):
+        try:
+            with open(name_path) as f:
+                if f.read().strip() == "gpio_keys":
+                    return "/dev/input/" + name_path.split("/")[4]
+        except OSError:
+            continue
+    return None
+
+
+def read_illuminance():
+    """Read current ambient light level in lux."""
+    try:
+        with open(LIGHT_SENSOR) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return -1
+
+
+def set_brightness(value):
+    """Set backlight brightness (0-255)."""
+    value = max(0, min(MAX_BRIGHTNESS, int(value)))
+    try:
+        with open(BACKLIGHT, "w") as f:
+            f.write(str(value))
+    except OSError as e:
+        print(f"Failed to set brightness to {value}: {e}", file=sys.stderr)
+
+
+def lux_to_brightness(lux):
+    """Map lux to brightness (linear from MIN to MAX over threshold to LUX_MAX)."""
+    if lux >= LUX_MAX:
+        return MAX_BRIGHTNESS
+    ratio = (lux - DARK_ON_THRESHOLD) / (LUX_MAX - DARK_ON_THRESHOLD)
+    ratio = max(0.0, min(1.0, ratio))
+    return int(MIN_BRIGHTNESS + ratio * (MAX_BRIGHTNESS - MIN_BRIGHTNESS))
+
+
+def main():
+    running = True
+
+    def handle_signal(signum, frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    # Find and open button device
+    button_path = find_gpio_keys_device()
+    button_fd = None
+    if button_path:
+        try:
+            button_fd = os.open(button_path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError as e:
+            print(f"Warning: Cannot open {button_path}: {e}", file=sys.stderr)
+    else:
+        print("Warning: gpio_keys device not found", file=sys.stderr)
+
+    wake_until = 0.0
+    last_brightness = -1
+    screen_on = True  # track state for hysteresis
+    recent_lux = []   # sliding window for smoothing
+
+    print("Backlight manager started", file=sys.stderr)
+    print(f"  Light sensor: {LIGHT_SENSOR}", file=sys.stderr)
+    print(f"  Backlight: {BACKLIGHT}", file=sys.stderr)
+    print(f"  Buttons: {button_path or 'not found'}", file=sys.stderr)
+    print(f"  Hysteresis: off<{DARK_OFF_THRESHOLD} lux, on>{DARK_ON_THRESHOLD} lux", file=sys.stderr)
+    sys.stderr.flush()
+
+    try:
+        while running:
+            now = time.monotonic()
+
+            # Drain button events (non-blocking)
+            if button_fd is not None:
+                try:
+                    readable, _, _ = select.select([button_fd], [], [], 0)
+                    if readable:
+                        while True:
+                            try:
+                                data = os.read(button_fd, EVENT_SIZE)
+                                if len(data) < EVENT_SIZE:
+                                    break
+                                _, _, ev_type, ev_code, ev_value = struct.unpack(
+                                    EVENT_FORMAT, data
+                                )
+                                if ev_type == EV_KEY and ev_value == 1:
+                                    wake_until = now + WAKE_DURATION
+                                    print(
+                                        f"Button press (code={ev_code}), "
+                                        f"wake for {WAKE_DURATION}s",
+                                        file=sys.stderr,
+                                    )
+                                    sys.stderr.flush()
+                            except BlockingIOError:
+                                break
+                except (OSError, ValueError):
+                    pass
+
+            # Determine target brightness
+            if now < wake_until:
+                target = WAKE_BRIGHTNESS
+                screen_on = True
+            else:
+                lux = read_illuminance()
+                if lux < 0:
+                    # Sensor error — keep current
+                    target = last_brightness if last_brightness >= 0 else MAX_BRIGHTNESS
+                else:
+                    # Smoothing: average recent readings
+                    recent_lux.append(lux)
+                    if len(recent_lux) > SMOOTHING_WINDOW:
+                        recent_lux.pop(0)
+                    avg_lux = sum(recent_lux) / len(recent_lux)
+
+                    # Hysteresis: use different thresholds depending on current state
+                    if screen_on:
+                        # Screen is on — only turn off if truly dark
+                        if avg_lux < DARK_OFF_THRESHOLD:
+                            target = 0
+                            screen_on = False
+                        else:
+                            target = lux_to_brightness(avg_lux)
+                    else:
+                        # Screen is off — only turn on if clearly bright
+                        if avg_lux > DARK_ON_THRESHOLD:
+                            target = lux_to_brightness(avg_lux)
+                            screen_on = True
+                        else:
+                            target = 0
+
+            # Only write if changed
+            if target != last_brightness:
+                set_brightness(target)
+                last_brightness = target
+
+            # Sleep until next poll, waking early on button events
+            if button_fd is not None:
+                select.select([button_fd], [], [], POLL_INTERVAL)
+            else:
+                time.sleep(POLL_INTERVAL)
+
+    finally:
+        if button_fd is not None:
+            os.close(button_fd)
+        set_brightness(200)
+        print("Backlight manager stopped", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

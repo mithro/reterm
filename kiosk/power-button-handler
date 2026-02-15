@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Power button handler for reTerminal.
+
+Monitors the GPIO power button (KEY_SLEEP, keycode 142):
+  - Hold 5 seconds: restart kiosk browser (cage-kiosk@tty7)
+  - Hold 10 seconds: reboot the device
+
+Actions trigger while the button is still held, not on release.
+"""
+import glob
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+
+EVENT_FORMAT = "llHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+EV_KEY = 0x01
+KEY_SLEEP = 142
+
+RESTART_HOLD = 5   # seconds to hold for browser restart
+REBOOT_HOLD = 10   # seconds to hold for reboot
+
+
+def find_gpio_keys():
+    for name_path in glob.glob("/sys/class/input/event*/device/name"):
+        try:
+            with open(name_path) as f:
+                if f.read().strip() == "gpio_keys":
+                    return "/dev/input/" + name_path.split("/")[4]
+        except OSError:
+            continue
+    return None
+
+
+def main():
+    dev = find_gpio_keys()
+    if not dev:
+        print("gpio_keys device not found", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Power button handler started, monitoring {dev}", file=sys.stderr)
+    print(f"  Hold {RESTART_HOLD}s = restart browser", file=sys.stderr)
+    print(f"  Hold {REBOOT_HOLD}s = reboot", file=sys.stderr)
+    sys.stderr.flush()
+
+    fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+    press_time = None
+    action_level = 0  # 0=none, 1=restart done, 2=reboot done
+
+    try:
+        while True:
+            timeout = 0.2 if press_time is not None else 2.0
+            ready, _, _ = select.select([fd], [], [], timeout)
+
+            if ready:
+                while True:
+                    try:
+                        data = os.read(fd, EVENT_SIZE)
+                        if len(data) < EVENT_SIZE:
+                            break
+                        _, _, ev_type, code, value = struct.unpack(
+                            EVENT_FORMAT, data
+                        )
+                        if ev_type == EV_KEY and code == KEY_SLEEP:
+                            if value == 1:
+                                press_time = time.monotonic()
+                                action_level = 0
+                            elif value == 0:
+                                press_time = None
+                                action_level = 0
+                    except BlockingIOError:
+                        break
+
+            # Check hold duration while button is pressed
+            if press_time is not None:
+                held = time.monotonic() - press_time
+                if held >= REBOOT_HOLD and action_level < 2:
+                    print(
+                        f"Power button held {held:.1f}s — rebooting",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+                    action_level = 2
+                    subprocess.run(["systemctl", "reboot"], check=False)
+                elif held >= RESTART_HOLD and action_level < 1:
+                    print(
+                        f"Power button held {held:.1f}s — restarting browser",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+                    action_level = 1
+                    t0 = time.monotonic()
+                    r = subprocess.run(
+                        ["systemctl", "stop", "cage-kiosk@tty7"],
+                        capture_output=True, text=True,
+                    )
+                    t1 = time.monotonic()
+                    print(
+                        f"  stop took {t1-t0:.2f}s (rc={r.returncode})",
+                        file=sys.stderr,
+                    )
+                    if r.stderr.strip():
+                        print(f"  stop stderr: {r.stderr.strip()}", file=sys.stderr)
+                    removed = []
+                    for f in ["/run/user/1000/wayland-0",
+                              "/run/user/1000/wayland-0.lock"]:
+                        try:
+                            os.unlink(f)
+                            removed.append(f)
+                        except OSError:
+                            pass
+                    t2 = time.monotonic()
+                    print(
+                        f"  socket cleanup {t2-t1:.2f}s, removed: {removed}",
+                        file=sys.stderr,
+                    )
+                    r = subprocess.run(
+                        ["systemctl", "start", "cage-kiosk@tty7"],
+                        capture_output=True, text=True,
+                    )
+                    t3 = time.monotonic()
+                    print(
+                        f"  start took {t3-t2:.2f}s (rc={r.returncode})",
+                        file=sys.stderr,
+                    )
+                    if r.stderr.strip():
+                        print(f"  start stderr: {r.stderr.strip()}", file=sys.stderr)
+                    print(
+                        f"  total restart: {t3-t0:.2f}s",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+
+    finally:
+        os.close(fd)
+
+
+if __name__ == "__main__":
+    main()

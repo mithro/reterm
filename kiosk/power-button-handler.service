@@ -1,0 +1,11 @@
+[Unit]
+Description=Power button handler (restart browser / reboot)
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/power-button-handler
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

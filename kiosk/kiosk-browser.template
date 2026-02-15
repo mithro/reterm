@@ -1,0 +1,35 @@
+#!/bin/bash
+# Kiosk browser wrapper for reTerminal
+# Runs inside cage: rotates display, then launches chromium
+#
+# @@KIOSK_URL@@ is replaced by flash.py at flash time with
+# the per-device dashboard URL.
+
+# Rotate the DSI display to landscape (270 degrees)
+wlr-randr --output DSI-1 --transform 270 2>&1 || true
+
+# Small delay to let rotation take effect
+sleep 1
+
+# Launch chromium in kiosk mode
+exec chromium \
+    --no-sandbox \
+    --user-data-dir=/home/tim/.config/chromium \
+    --kiosk \
+    --start-maximized \
+    --start-fullscreen \
+    --no-first-run \
+    --disable-translate \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --disable-component-update \
+    --autoplay-policy=no-user-gesture-required \
+    --check-for-update-interval=31536000 \
+    --ignore-certificate-errors \
+    --ozone-platform=wayland \
+    --enable-features=UseOzonePlatform \
+    --overscroll-history-navigation=0 \
+    --pull-to-refresh=0 \
+    --load-extension=/usr/local/share/kiosk/hide-cursor-extension \
+    "@@KIOSK_URL@@?cb=$(date +%s)"

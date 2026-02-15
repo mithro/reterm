@@ -1,0 +1,34 @@
+[Unit]
+Description=Cage Kiosk Browser on %I
+After=systemd-user-sessions.service
+After=seatd.service
+Requires=seatd.service
+
+[Service]
+User=tim
+Group=tim
+SupplementaryGroups=video render input
+
+StandardOutput=journal
+StandardError=journal
+
+Environment=HOME=/home/tim
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=LIBSEAT_BACKEND=seatd
+Environment=DBUS_SESSION_BUS_ADDRESS=/dev/null
+Environment=XCURSOR_THEME=transparent
+Environment=XCURSOR_PATH=/usr/share/icons
+Environment=XCURSOR_SIZE=1
+
+ExecStartPre=-/bin/rm -f /run/user/1000/wayland-0 /run/user/1000/wayland-0.lock
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-browser
+
+KillSignal=SIGKILL
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=30
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+DefaultInstance=tty7

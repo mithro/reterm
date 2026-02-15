@@ -1,0 +1,11 @@
+[Unit]
+Description=Backlight Manager (ambient light + button wake)
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/backlight-manager
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
