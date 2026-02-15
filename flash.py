@@ -271,11 +271,17 @@ def customize_image(
                 )
                 print(f"  Set kiosk URL: {kiosk_url}")
             else:
-                print("  WARNING: @@KIOSK_URL@@ placeholder not found in kiosk-browser",
+                print("ERROR: @@KIOSK_URL@@ placeholder not found in kiosk-browser",
                       file=sys.stderr)
+                print("The kiosk browser will not load the correct dashboard.",
+                      file=sys.stderr)
+                sys.exit(1)
         else:
-            print("  WARNING: /usr/local/bin/kiosk-browser not found in image",
+            print("ERROR: /usr/local/bin/kiosk-browser not found in image",
                   file=sys.stderr)
+            print("Was the generic image built with build-image.py?",
+                  file=sys.stderr)
+            sys.exit(1)
 
     finally:
         # Unmount everything
