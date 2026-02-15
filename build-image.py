@@ -758,7 +758,9 @@ def build_seeed_drivers(rootfs: Path, kver: str) -> None:
         if result.stdout.strip():
             print(f"    Found mipi_dsi module at: {result.stdout.strip()}")
         else:
-            print("    WARNING: mipi_dsi module not found after build!", file=sys.stderr)
+            print("ERROR: mipi_dsi module not found after build!", file=sys.stderr)
+            print("The display will not work without this driver.", file=sys.stderr)
+            sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
