@@ -556,7 +556,17 @@ def setup_chroot(rootfs: Path, boot_mount: Path) -> str:
     real_uname = rootfs / "usr/bin/uname.real"
     fake_uname = rootfs / "usr/bin/uname"
     if not real_uname.exists():
-        shutil.copy2(fake_uname, real_uname)
+        # Guard against previous failed run: if uname is already a text
+        # script (our wrapper), don't copy it over uname.real — the real
+        # binary would be lost.
+        uname_header = fake_uname.read_bytes()[:4]
+        if uname_header == b'#!/b':
+            print("    WARNING: uname is already a wrapper script (stale from previous run)",
+                  file=sys.stderr)
+            print("    Skipping uname wrapper — chroot uname -r may return wrong version",
+                  file=sys.stderr)
+        else:
+            shutil.copy2(fake_uname, real_uname)
     fake_uname.write_text(
         f'#!/bin/sh\n'
         f'# Wrapper to return target kernel version in chroot\n'
