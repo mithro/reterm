@@ -14,7 +14,6 @@ No secrets or per-device configuration are included in the image.
 
 import hashlib
 import lzma
-import os
 import re
 import shutil
 import struct
