@@ -533,14 +533,19 @@ def setup_chroot(rootfs: Path, boot_mount: Path) -> str:
 
     # Copy resolv.conf (handle systemd-resolved symlink)
     resolv_dest = rootfs / "etc/resolv.conf"
+    resolv_backup = rootfs / "etc/resolv.conf.bak"
     resolv_src = Path("/etc/resolv.conf")
-    # Remove existing (might be a symlink to systemd-resolved)
-    if resolv_dest.is_symlink() or resolv_dest.exists():
+    # Save original (might be a symlink to systemd-resolved)
+    if resolv_dest.is_symlink():
+        resolv_backup.write_text(str(resolv_dest.readlink()))
+        resolv_dest.unlink()
+    elif resolv_dest.exists():
+        shutil.copy2(resolv_dest, resolv_backup)
         resolv_dest.unlink()
     # Read the resolved content from host
     resolv_content = resolv_src.read_text()
     resolv_dest.write_text(resolv_content)
-    print("    Copied resolv.conf")
+    print("    Copied resolv.conf (original backed up)")
 
     # Write policy-rc.d to prevent services from starting during install
     policy_path = rootfs / "usr/sbin/policy-rc.d"
@@ -599,6 +604,21 @@ def teardown_chroot(rootfs: Path) -> None:
     if policy_path.exists():
         policy_path.unlink()
         print("    Removed policy-rc.d")
+
+    # Restore resolv.conf
+    resolv_dest = rootfs / "etc/resolv.conf"
+    resolv_backup = rootfs / "etc/resolv.conf.bak"
+    if resolv_backup.exists():
+        backup_content = resolv_backup.read_text()
+        # If backup is a path (was a symlink), restore symlink
+        if not backup_content.startswith("#") and "/" in backup_content and "\n" not in backup_content.strip():
+            resolv_dest.unlink(missing_ok=True)
+            resolv_dest.symlink_to(backup_content.strip())
+            print(f"    Restored resolv.conf symlink -> {backup_content.strip()}")
+        else:
+            shutil.copy2(resolv_backup, resolv_dest)
+            print("    Restored resolv.conf")
+        resolv_backup.unlink()
 
     # Remove qemu binary
     qemu_path = rootfs / "usr/bin/qemu-aarch64-static"
