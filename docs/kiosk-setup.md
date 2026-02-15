@@ -3,7 +3,8 @@
 ## Overview
 
 The reTerminal (Seeed Studio, CM4108032) runs a kiosk displaying Home Assistant
-at `http://ha.monarto.mithis.com:8123/local/reterminal.html` using cage (Wayland compositor) + Chromium.
+using cage (Wayland compositor) + Chromium. Images are built generically on CI
+and customized per-device at flash time.
 
 ## Hardware
 
@@ -14,6 +15,15 @@ at `http://ha.monarto.mithis.com:8123/local/reterminal.html` using cage (Wayland
 - **Backlight**: I2C controlled, `/sys/class/backlight/1-0045/brightness` (0-255)
 - **Buttons**: 4x GPIO keys (keycodes 30-33 = A/S/D/F) + power button (keycode 142 = KEY_SLEEP); event number varies between boots
 - **Serial console**: GPIO UART on `/dev/ttyAMA0` at 115200 baud
+
+## Build Architecture
+
+Two-stage process:
+
+1. **`build-image.py`** (runs on CI) — produces a generic `reterminal-base.img.xz` with all software pre-installed. No secrets, no per-device config.
+2. **`flash.py <hostname>`** (runs locally) — extracts the generic image, injects device-specific config (hostname, WiFi PSK, SSH keys, dashboard URL), and flashes to eMMC.
+
+See [build.md](build.md) for detailed build/flash instructions.
 
 ## Kiosk Architecture
 
@@ -36,24 +46,25 @@ systemd (cage-kiosk@tty7.service)
 | `/usr/local/bin/power-button-handler` | Power button: 5s = restart browser, 10s = reboot |
 | `/etc/systemd/system/power-button-handler.service` | Power button handler unit |
 | `/usr/local/share/kiosk/hide-cursor-extension/` | Chromium extension to hide cursor |
-| `/home/tim/.icons/transparent/` | Transparent cursor theme (fallback) |
+| `/usr/share/icons/transparent/` | Transparent cursor theme |
 
-### Staging Files (this repo)
+### Source Files (this repo)
 
-All files deployed to the device are maintained in `staging/`:
+Production deployment files are in `kiosk/`:
 
-| File | Deployed to |
-|------|------------|
-| `staging/cage-kiosk@.service` | `/etc/systemd/system/` |
-| `staging/kiosk-browser` | `/usr/local/bin/` |
-| `staging/backlight-manager` | `/usr/local/bin/` |
-| `staging/backlight-manager.service` | `/etc/systemd/system/` |
-| `staging/power-button-handler` | `/usr/local/bin/` |
-| `staging/power-button-handler.service` | `/etc/systemd/system/` |
-| `staging/hide-cursor-extension/` | `/usr/local/share/kiosk/hide-cursor-extension/` |
-| `staging/create_transparent_cursor.py` | Run once during image build to create cursor theme |
-| `staging/disable_tp_rotate.py` | Patch to disable driver touch rotation (run at build) |
-| `staging/revert_i2c_read.py` | Reverts I2C to separate transactions (no longer needed, original driver is correct) |
+| Source | Deployed to |
+|--------|------------|
+| `kiosk/cage-kiosk@.service` | `/etc/systemd/system/` |
+| `kiosk/kiosk-browser.template` | `/usr/local/bin/kiosk-browser` (URL injected at flash time) |
+| `kiosk/backlight-manager` | `/usr/local/bin/` |
+| `kiosk/backlight-manager.service` | `/etc/systemd/system/` |
+| `kiosk/power-button-handler` | `/usr/local/bin/` |
+| `kiosk/power-button-handler.service` | `/etc/systemd/system/` |
+| `kiosk/hide-cursor-extension/` | `/usr/local/share/kiosk/hide-cursor-extension/` |
+| `kiosk/create_transparent_cursor.py` | Used at build time only |
+| `kiosk/disable_tp_rotate.py` | Patch reference (applied at build time) |
+
+Debug/test scripts live in `tools/` and are not deployed to devices.
 
 ## Fixes Applied
 
@@ -80,12 +91,12 @@ device tree) rotates touch coordinates 90 degrees. But cage's `wlr-randr
 - Center of screen: correct (rotation around center is identity)
 - Corners: touch coordinates wildly off (616px average error)
 
-**Fix**: Comment out the `x_y_rotate()` call in `touch_panel.c`. The script
-`staging/disable_tp_rotate.py` applies this patch.
+**Fix**: Comment out the `x_y_rotate()` call in `touch_panel.c`. This is
+applied automatically by `build-image.py` during the Seeed driver build.
 
 After both fixes, calibration shows avg 15.7px accuracy (max 40.8px).
 
-#### Rebuilding the Module
+#### Rebuilding the Module (manual, on device)
 
 ```bash
 cd /opt/seeed-linux-dtoverlays/modules/mipi_dsi
@@ -195,20 +206,3 @@ sudo journalctl -u cage-kiosk@tty7 -f
 sudo journalctl -u backlight-manager -f
 sudo journalctl -u power-button-handler -f
 ```
-
-## Bake Into Image
-
-The following must be done during image build (in `build-image.py`):
-
-1. **Install packages**: `cage chromium wlr-randr seatd fonts-noto-color-emoji`
-2. **Install Seeed drivers**: Clone + build `seeed-linux-dtoverlays`, apply touch rotation patch (`disable_tp_rotate.py`)
-3. **Deploy kiosk files**: Copy all `staging/` files to their target paths
-4. **Create transparent cursor theme**: Run `create_transparent_cursor.py` as user `tim`
-5. **Install hide-cursor extension**: Copy `staging/hide-cursor-extension/` to `/usr/local/share/kiosk/`
-6. **Enable services**: `cage-kiosk@tty7`, `backlight-manager`, `power-button-handler`, `seatd`
-7. **User groups**: Ensure `tim` is in `video`, `render`, `input`
-8. **PAM config**: Deploy `/etc/pam.d/cage`
-
-Note: The original Seeed `i2c_md_read()` in `mipi_dsi_drv.c` uses separate I2C transactions
-(STOP between write/read), which is **correct** for this hardware. Do NOT patch it to use
-combined transactions (repeated START) — that breaks touch detection entirely.
