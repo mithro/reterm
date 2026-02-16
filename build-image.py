@@ -275,7 +275,20 @@ def expand_image(img_path: Path, extra_mb: int = 2048) -> None:
 
     try:
         # Check and resize filesystem
-        subprocess.run(["sudo", "e2fsck", "-f", "-y", loop_dev], check=False)
+        # e2fsck returns: 0=no errors, 1=errors corrected, 2=corrected+reboot needed
+        # Codes 4+ indicate uncorrected errors — abort to avoid corruption
+        result = subprocess.run(
+            ["sudo", "e2fsck", "-f", "-y", loop_dev],
+            capture_output=True, text=True,
+        )
+        if result.returncode >= 4:
+            print(f"ERROR: e2fsck found uncorrectable errors (exit code {result.returncode})",
+                  file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            sys.exit(1)
+        if result.returncode > 0:
+            print(f"  e2fsck corrected errors (exit code {result.returncode})")
+
         subprocess.run(["sudo", "resize2fs", loop_dev], check=True)
         print(f"  Filesystem expanded on {loop_dev}")
     finally:
