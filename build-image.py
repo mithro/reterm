@@ -14,6 +14,7 @@ No secrets or per-device configuration are included in the image.
 
 import hashlib
 import lzma
+import os
 import re
 import shutil
 import struct
@@ -40,15 +41,26 @@ SEEED_REPO = "https://github.com/Seeed-Studio/seeed-linux-dtoverlays"
 # ---------------------------------------------------------------------------
 
 def check_build_prerequisites() -> None:
-    """Verify all required tools are available for image building."""
+    """Verify all required tools are available for image building.
+
+    The script must run as root because it mounts partitions and
+    writes files to them. On CI, use: sudo -E uv run build-image.py
+    """
     print("Checking build prerequisites...")
 
+    # Must run as root — we mount partitions and write to them directly
+    if os.geteuid() != 0:
+        print("ERROR: This script must be run as root.", file=sys.stderr)
+        print("  Run with: sudo -E uv run build-image.py", file=sys.stderr)
+        sys.exit(1)
+
     required = {
-        "qemu-aarch64-static": "Install: sudo apt-get install qemu-user-static",
-        "parted": "Install: sudo apt-get install parted",
-        "e2fsck": "Install: sudo apt-get install e2fsprogs",
-        "resize2fs": "Install: sudo apt-get install e2fsprogs",
-        "fdisk": "Install: sudo apt-get install fdisk",
+        "qemu-aarch64-static": "Install: apt-get install qemu-user-static",
+        "parted": "Install: apt-get install parted",
+        "e2fsck": "Install: apt-get install e2fsprogs",
+        "resize2fs": "Install: apt-get install e2fsprogs",
+        "fdisk": "Install: apt-get install fdisk",
+        "git": "Install: apt-get install git",
     }
 
     missing = []
@@ -61,7 +73,7 @@ def check_build_prerequisites() -> None:
     if not binfmt_path.exists():
         missing.append(
             "  binfmt_misc qemu-aarch64 — "
-            "Install: sudo apt-get install qemu-user-static binfmt-support"
+            "Install: apt-get install qemu-user-static binfmt-support"
         )
 
     if missing:
