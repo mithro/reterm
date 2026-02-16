@@ -808,11 +808,11 @@ def configure_image(img_path: Path) -> None:
     4. Deploys kiosk files (no chroot needed)
     5. Creates transparent cursor theme
     6. Creates PAM config for cage
-    7. Enables systemd services
-    8. Sets up chroot environment
-    9. Installs packages in chroot
-    10. Builds Seeed display drivers in chroot
-    11. Tears down chroot
+    7. Sets up chroot environment
+    8. Installs packages in chroot
+    9. Builds Seeed display drivers in chroot
+    10. Tears down chroot
+    11. Enables systemd services (after packages installed)
     12. Unmounts everything
     """
     print("Configuring image...")
@@ -916,21 +916,23 @@ def configure_image(img_path: Path) -> None:
         # Step 5: Create PAM config
         create_pam_config(rootfs_mount)
 
-        # Step 6: Enable services
-        enable_services(rootfs_mount)
-
-        # Step 7: Set up chroot
+        # Step 6: Set up chroot
         kver = setup_chroot(rootfs_mount, boot_mount)
 
         try:
-            # Step 8: Install packages
+            # Step 7: Install packages (must happen before enable_services
+            # because seatd.service comes from the seatd package)
             install_packages(rootfs_mount)
 
-            # Step 9: Build Seeed drivers
+            # Step 8: Build Seeed drivers
             build_seeed_drivers(rootfs_mount, kver)
         finally:
-            # Step 10: Teardown chroot (always, even on failure)
+            # Step 9: Teardown chroot (always, even on failure)
             teardown_chroot(rootfs_mount)
+
+        # Step 10: Enable services (after install_packages so that
+        # seatd.service exists; uses systemctl --root, no chroot needed)
+        enable_services(rootfs_mount)
 
     finally:
         # Unmount everything
