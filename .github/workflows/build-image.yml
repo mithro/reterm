@@ -23,7 +23,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Build generic image
-        run: sudo -E uv run build-image.py
+        run: sudo -E env "PATH=$PATH" uv run build-image.py
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
