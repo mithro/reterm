@@ -688,7 +688,7 @@ def install_packages(rootfs: Path) -> None:
 
     packages = [
         "cage", "chromium", "wlr-randr", "seatd", "fonts-noto-color-emoji",
-        "git", "build-essential", "dkms", "raspberrypi-kernel-headers",
+        "git", "build-essential", "dkms", "linux-headers-rpi-v8",
     ]
     run_in_chroot(
         rootfs,
