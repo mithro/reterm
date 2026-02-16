@@ -820,31 +820,82 @@ def configure_image(img_path: Path) -> None:
 
     boot_offset, rootfs_offset = find_partition_offsets(img_path)
 
+    # Parse partition sizes from fdisk for losetup --sizelimit.
+    # Using explicit loop devices avoids "overlapping loop device"
+    # errors that occur with mount -o loop,offset=... on the same
+    # backing file.
+    result = subprocess.run(
+        ["fdisk", "-l", str(img_path)],
+        capture_output=True, text=True, check=True,
+    )
+    sector_size = 512
+    boot_size = None
+    rootfs_size = None
+    for line in result.stdout.splitlines():
+        m = re.search(r"Sector size.*?:\s*(\d+)\s*bytes", line)
+        if m:
+            sector_size = int(m.group(1))
+        if not line.startswith(str(img_path)):
+            continue
+        parts = line.split()
+        start_sector = int(parts[1])
+        num_sectors = int(parts[3])
+        size_bytes = num_sectors * sector_size
+        if "FAT32" in line or " c " in line:
+            boot_size = size_bytes
+            print(f"  Boot partition size: {size_bytes} bytes")
+        elif "Linux" in line:
+            rootfs_size = size_bytes
+            print(f"  Root partition size: {size_bytes} bytes")
+
+    if boot_size is None or rootfs_size is None:
+        print("ERROR: Could not determine partition sizes", file=sys.stderr)
+        sys.exit(1)
+
     rootfs_mount = TMP_DIR / "rootfs-mount"
     boot_mount = TMP_DIR / "boot-mount"
     rootfs_mount.mkdir(parents=True, exist_ok=True)
     boot_mount.mkdir(parents=True, exist_ok=True)
 
+    # Create explicit loop devices for each partition
+    boot_loop = None
+    rootfs_loop = None
+
     try:
-        # Mount rootfs
+        result = subprocess.run(
+            [
+                "losetup", "--find", "--show",
+                "--offset", str(boot_offset),
+                "--sizelimit", str(boot_size),
+                str(img_path),
+            ],
+            capture_output=True, text=True, check=True,
+        )
+        boot_loop = result.stdout.strip()
+        print(f"  Boot loop device: {boot_loop}")
+
+        result = subprocess.run(
+            [
+                "losetup", "--find", "--show",
+                "--offset", str(rootfs_offset),
+                "--sizelimit", str(rootfs_size),
+                str(img_path),
+            ],
+            capture_output=True, text=True, check=True,
+        )
+        rootfs_loop = result.stdout.strip()
+        print(f"  Rootfs loop device: {rootfs_loop}")
+
+        # Mount via the loop devices
         print(f"Mounting rootfs at {rootfs_mount}")
         subprocess.run(
-            [
-                "sudo", "mount",
-                "-o", f"loop,offset={rootfs_offset}",
-                str(img_path), str(rootfs_mount),
-            ],
+            ["mount", rootfs_loop, str(rootfs_mount)],
             check=True,
         )
 
-        # Mount boot
         print(f"Mounting boot at {boot_mount}")
         subprocess.run(
-            [
-                "sudo", "mount",
-                "-o", f"loop,offset={boot_offset}",
-                str(img_path), str(boot_mount),
-            ],
+            ["mount", boot_loop, str(boot_mount)],
             check=True,
         )
 
@@ -884,8 +935,14 @@ def configure_image(img_path: Path) -> None:
     finally:
         # Unmount everything
         print("Unmounting partitions...")
-        subprocess.run(["sudo", "umount", str(boot_mount)], check=False)
-        subprocess.run(["sudo", "umount", str(rootfs_mount)], check=False)
+        subprocess.run(["umount", str(boot_mount)], check=False)
+        subprocess.run(["umount", str(rootfs_mount)], check=False)
+
+        # Detach loop devices
+        if boot_loop:
+            subprocess.run(["losetup", "-d", boot_loop], check=False)
+        if rootfs_loop:
+            subprocess.run(["losetup", "-d", rootfs_loop], check=False)
 
         # Clean up mount directories
         for d in [boot_mount, rootfs_mount]:
