@@ -28,8 +28,8 @@ VALID_HOSTNAMES = ("reterm1", "reterm2")
 WIFI_SSID = "ansells-iot"
 
 KIOSK_URLS = {
-    "reterm1": "http://ha.monarto.mithis.com:8123/local/reterminal.html",
-    "reterm2": "http://ha.monarto.mithis.com:8123/local/reterminal.html",
+    "reterm1": "https://ha.monarto.mithis.com/local/reterminal.html",
+    "reterm2": "https://ha.monarto.mithis.com/local/reterminal.html",
 }
 
 SCRIPT_DIR = Path(__file__).resolve().parent
