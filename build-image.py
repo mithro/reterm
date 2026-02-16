@@ -902,10 +902,18 @@ def configure_image(img_path: Path) -> None:
         # Step 1: Configure serial consoles (GPIO UART only)
         configure_serial_consoles(boot_mount)
 
-        # Step 2: Write SSH marker file
+        # Step 2: Write SSH marker file and remove stock cloud-init
         ssh_file = boot_mount / "ssh"
         ssh_file.touch()
         print("  Created /boot/firmware/ssh marker")
+
+        # Remove stock RPi OS cloud-init files from boot partition.
+        # flash.py writes device-specific cloud-init at flash time.
+        for ci_file in ["user-data", "network-config", "meta-data"]:
+            ci_path = boot_mount / ci_file
+            if ci_path.exists():
+                ci_path.unlink()
+                print(f"  Removed stock {ci_file} from boot")
 
         # Step 3: Deploy kiosk files (no chroot needed)
         deploy_kiosk_files(rootfs_mount)
