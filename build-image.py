@@ -354,6 +354,14 @@ def configure_serial_consoles(boot_mount: Path) -> None:
         modified = True
         print("    cmdline.txt: added console=serial0,115200")
 
+    # Set WiFi regulatory country (Australia) — prevents rfkill from
+    # blocking WiFi on boot. This is the RPi OS standard mechanism,
+    # checked by /etc/profile.d/wifi-check.sh.
+    if "cfg80211.ieee80211_regdom=" not in cmdline:
+        cmdline += " cfg80211.ieee80211_regdom=AU"
+        modified = True
+        print("    cmdline.txt: added cfg80211.ieee80211_regdom=AU")
+
     if modified:
         cmdline_txt.write_text(cmdline + "\n")
 
@@ -919,6 +927,19 @@ def configure_image(img_path: Path) -> None:
         )
         print("  Disabled SSH password authentication (key-only)")
 
+        # Pre-configure NetworkManager to have WiFi radio enabled.
+        # Without this, NM starts with WiFi disabled and won't connect.
+        nm_state_dir = rootfs_mount / "var/lib/NetworkManager"
+        nm_state_dir.mkdir(parents=True, exist_ok=True)
+        nm_state_file = nm_state_dir / "NetworkManager.state"
+        nm_state_file.write_text(
+            "[main]\n"
+            "NetworkingEnabled=true\n"
+            "WirelessEnabled=true\n"
+            "WWANEnabled=true\n"
+        )
+        print("  Pre-configured NetworkManager WiFi radio enabled")
+
         # Remove stock RPi OS cloud-init files from boot partition.
         # flash.py writes device-specific cloud-init at flash time.
         for ci_file in ["user-data", "network-config", "meta-data"]:
@@ -953,6 +974,26 @@ def configure_image(img_path: Path) -> None:
         # Step 10: Enable services (after install_packages so that
         # seatd.service exists; uses systemctl --root, no chroot needed)
         enable_services(rootfs_mount)
+
+        # Step 11: Clean up Seeed driver build side-effects.
+        # reTerminal.sh copies Wayfire/kanshi desktop configs into
+        # /home/ and /etc/skel/. These are root-owned and irrelevant
+        # to our cage kiosk — and the root ownership on .config/
+        # prevents chromium from creating its data directory.
+        print("  Cleaning up Seeed driver build artifacts...")
+        for base in [rootfs_mount / "etc/skel", rootfs_mount / "root"]:
+            config_dir = base / ".config"
+            if config_dir.exists():
+                shutil.rmtree(config_dir)
+                print(f"    Removed {config_dir.relative_to(rootfs_mount)}")
+        # Also clean any home dirs that reTerminal.sh may have created
+        home_dir = rootfs_mount / "home"
+        if home_dir.exists():
+            for user_dir in home_dir.iterdir():
+                config_dir = user_dir / ".config"
+                if config_dir.exists():
+                    shutil.rmtree(config_dir)
+                    print(f"    Removed {config_dir.relative_to(rootfs_mount)}")
 
     finally:
         # Unmount everything
