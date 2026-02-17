@@ -7,3 +7,6 @@ network:
       access-points:
         "ansells-iot":
           password: "{{ wifi_psk }}"
+      networkmanager:
+        passthrough:
+          ipv6.dhcp-duid: "ll"
