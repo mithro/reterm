@@ -196,6 +196,30 @@ def extract_for_device(xz_path: Path, hostname: str) -> Path:
     return img_path
 
 
+def sudo_umount(mount_point: Path) -> None:
+    """Unmount with sync, retry, and lazy fallback for busy mounts."""
+    subprocess.run(["sudo", "sync"], check=False)
+    result = subprocess.run(
+        ["sudo", "umount", str(mount_point)],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return
+
+    # Retry after a short delay (desktop services may release quickly)
+    time.sleep(1)
+    result = subprocess.run(
+        ["sudo", "umount", str(mount_point)],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return
+
+    # Lazy unmount as last resort
+    print(f"  Mount busy, using lazy unmount for {mount_point}")
+    subprocess.run(["sudo", "umount", "-l", str(mount_point)], check=False)
+
+
 def customize_image(
     img_path: Path,
     hostname: str,
@@ -215,6 +239,9 @@ def customize_image(
     boot_mount.mkdir(parents=True, exist_ok=True)
     rootfs_mount.mkdir(parents=True, exist_ok=True)
 
+    boot_mounted = False
+    rootfs_mounted = False
+
     try:
         # Mount boot partition
         print(f"Mounting boot partition at {boot_mount}")
@@ -226,6 +253,7 @@ def customize_image(
             ],
             check=True,
         )
+        boot_mounted = True
 
         # Write cloud-init files
         for filename, content in rendered_cloud_init.items():
@@ -241,7 +269,8 @@ def customize_image(
         print("  Cloud-init files written")
 
         # Unmount boot before mounting rootfs (both are loop mounts on same image)
-        subprocess.run(["sudo", "umount", str(boot_mount)], check=True)
+        sudo_umount(boot_mount)
+        boot_mounted = False
 
         # Mount rootfs partition
         print(f"Mounting rootfs at {rootfs_mount}")
@@ -253,6 +282,7 @@ def customize_image(
             ],
             check=True,
         )
+        rootfs_mounted = True
 
         # Replace @@KIOSK_URL@@ in kiosk-browser
         kiosk_browser = rootfs_mount / "usr/local/bin/kiosk-browser"
@@ -283,10 +313,14 @@ def customize_image(
                   file=sys.stderr)
             sys.exit(1)
 
+        sudo_umount(rootfs_mount)
+        rootfs_mounted = False
+
     finally:
-        # Unmount everything
-        subprocess.run(["sudo", "umount", str(boot_mount)], check=False)
-        subprocess.run(["sudo", "umount", str(rootfs_mount)], check=False)
+        if boot_mounted:
+            sudo_umount(boot_mount)
+        if rootfs_mounted:
+            sudo_umount(rootfs_mount)
 
         for d in [boot_mount, rootfs_mount]:
             if d.exists():
