@@ -20,6 +20,9 @@ Environment=XCURSOR_THEME=transparent
 Environment=XCURSOR_PATH=/usr/share/icons
 Environment=XCURSOR_SIZE=1
 
+ExecStartPre=/bin/mkdir -p /run/user/1000
+ExecStartPre=/bin/chown tim:tim /run/user/1000
+ExecStartPre=/bin/chmod 0700 /run/user/1000
 ExecStartPre=-/bin/rm -f /run/user/1000/wayland-0 /run/user/1000/wayland-0.lock
 ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-browser
 
