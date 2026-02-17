@@ -2,6 +2,9 @@
 hostname: {{ hostname }}
 manage_etc_hosts: true
 
+# SSH key-only auth — password login disabled for SSH, console still works
+ssh_pwauth: false
+
 # cloud-init generates netplan config but won't activate it on boot.
 # bootcmd runs on every boot and applies WiFi config.
 bootcmd:
@@ -19,7 +22,9 @@ users:
     sudo: "ALL=(ALL) NOPASSWD:ALL"
     shell: /bin/bash
     groups: adm, dialout, cdrom, sudo, audio, video, plugdev, games, users, input, render, netdev, gpio, i2c, spi
-    lock_passwd: true
+    lock_passwd: false
+    # Default password "raspberry" — SSH key auth is primary access method
+    plain_text_passwd: raspberry
     ssh_authorized_keys:
 {% for key in ssh_keys %}
       - {{ key }}

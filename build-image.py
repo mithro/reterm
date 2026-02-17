@@ -907,6 +907,18 @@ def configure_image(img_path: Path) -> None:
         ssh_file.touch()
         print("  Created /boot/firmware/ssh marker")
 
+        # Disable password authentication for SSH (key-only).
+        # Console password login is unaffected.
+        sshd_conf_dir = rootfs_mount / "etc/ssh/sshd_config.d"
+        sshd_conf_dir.mkdir(parents=True, exist_ok=True)
+        sshd_no_passwd = sshd_conf_dir / "10-no-password-auth.conf"
+        sshd_no_passwd.write_text(
+            "# Disable password auth — use SSH keys only\n"
+            "PasswordAuthentication no\n"
+            "KbdInteractiveAuthentication no\n"
+        )
+        print("  Disabled SSH password authentication (key-only)")
+
         # Remove stock RPi OS cloud-init files from boot partition.
         # flash.py writes device-specific cloud-init at flash time.
         for ci_file in ["user-data", "network-config", "meta-data"]:
