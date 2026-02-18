@@ -168,3 +168,190 @@ def find_gpio_keys_device():
         except OSError:
             continue
     return None
+
+
+def get_hostname():
+    """Return short hostname (e.g. 'reterm1')."""
+    return socket.gethostname().split(".")[0]
+
+
+def make_device_info(hostname, group):
+    """Build HA MQTT device info dict."""
+    return {
+        "identifiers": [f"{hostname}_{group}"],
+        "name": f"{hostname} {group}",
+        "manufacturer": "Seeed Studio",
+        "model": "reTerminal CM4",
+    }
+
+
+def discovery_configs(hostname):
+    """Generate (topic, payload) tuples for HA MQTT auto-discovery."""
+    avail = {"topic": f"reterminal/{hostname}/availability"}
+    env_dev = make_device_info(hostname, "environment")
+    sys_dev = make_device_info(hostname, "system")
+    env_state = f"reterminal/{hostname}/environment/state"
+    sys_state = f"reterminal/{hostname}/system/state"
+
+    configs = []
+
+    # --- Environment sensors ---
+    configs.append((
+        f"homeassistant/sensor/{hostname}_illuminance/config",
+        {
+            "name": "Illuminance",
+            "unique_id": f"{hostname}_illuminance",
+            "device_class": "illuminance",
+            "unit_of_measurement": "lx",
+            "state_topic": env_state,
+            "value_template": "{{ value_json.illuminance }}",
+            "availability": avail,
+            "device": env_dev,
+        },
+    ))
+
+    # --- System sensors ---
+    configs.append((
+        f"homeassistant/sensor/{hostname}_cpu_temperature/config",
+        {
+            "name": "CPU Temperature",
+            "unique_id": f"{hostname}_cpu_temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "\u00b0C",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.cpu_temperature }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/sensor/{hostname}_uptime/config",
+        {
+            "name": "Uptime",
+            "unique_id": f"{hostname}_uptime",
+            "device_class": "duration",
+            "unit_of_measurement": "s",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.uptime }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/sensor/{hostname}_wifi_rssi/config",
+        {
+            "name": "WiFi RSSI",
+            "unique_id": f"{hostname}_wifi_rssi",
+            "device_class": "signal_strength",
+            "unit_of_measurement": "dBm",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.wifi_rssi }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/sensor/{hostname}_backlight/config",
+        {
+            "name": "Backlight",
+            "unique_id": f"{hostname}_backlight",
+            "icon": "mdi:brightness-6",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.backlight }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/binary_sensor/{hostname}_screen/config",
+        {
+            "name": "Screen",
+            "unique_id": f"{hostname}_screen",
+            "device_class": "power",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.screen }}",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    # Accelerometer raw
+    for axis in ("x", "y", "z"):
+        configs.append((
+            f"homeassistant/sensor/{hostname}_accel_{axis}/config",
+            {
+                "name": f"Accelerometer {axis.upper()}",
+                "unique_id": f"{hostname}_accel_{axis}",
+                "unit_of_measurement": "mg",
+                "icon": "mdi:axis-arrow",
+                "state_topic": sys_state,
+                "value_template": f"{{{{ value_json.accel_{axis} }}}}",
+                "availability": avail,
+                "device": sys_dev,
+                "entity_category": "diagnostic",
+            },
+        ))
+
+    configs.append((
+        f"homeassistant/sensor/{hostname}_orientation/config",
+        {
+            "name": "Orientation",
+            "unique_id": f"{hostname}_orientation",
+            "icon": "mdi:screen-rotation",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.orientation }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/sensor/{hostname}_tilt_angle/config",
+        {
+            "name": "Tilt Angle",
+            "unique_id": f"{hostname}_tilt_angle",
+            "unit_of_measurement": "\u00b0",
+            "icon": "mdi:angle-acute",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.tilt_angle }}",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    configs.append((
+        f"homeassistant/binary_sensor/{hostname}_vibration/config",
+        {
+            "name": "Vibration",
+            "unique_id": f"{hostname}_vibration",
+            "device_class": "vibration",
+            "state_topic": sys_state,
+            "value_template": "{{ value_json.vibration }}",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "availability": avail,
+            "device": sys_dev,
+        },
+    ))
+
+    # Button device triggers
+    for keycode, key_name in KEY_MAP.items():
+        configs.append((
+            f"homeassistant/device_automation/{hostname}_button_{key_name}/config",
+            {
+                "automation_type": "trigger",
+                "type": "button_short_press",
+                "subtype": f"button_{key_name}",
+                "topic": f"reterminal/{hostname}/button/event",
+                "payload": key_name,
+                "device": sys_dev,
+            },
+        ))
+
+    return configs
