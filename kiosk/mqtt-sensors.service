@@ -1,0 +1,12 @@
+[Unit]
+Description=MQTT sensor publisher for Home Assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/mqtt-sensors
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
