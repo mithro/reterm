@@ -95,9 +95,10 @@ def read_wifi_rssi():
         return None
     for line in val.splitlines():
         if "wlan0" in line:
-            # Format: "wlan0: 0000  -52.  -256.  ..."
-            # Signal level is the 3rd field (after interface and status)
-            match = re.search(r"wlan0:\s+\S+\s+(-?\d+)\.", line)
+            # Format: "wlan0: status  quality.  level.  noise.  ..."
+            # e.g.    "wlan0: 0000   55.       -52.    -256.   ..."
+            # Skip interface, status, and quality to get signal level (dBm)
+            match = re.search(r"wlan0:\s+\S+\s+\S+\s+(-?\d+)\.", line)
             if match:
                 return int(match.group(1))
     return None
@@ -375,9 +376,15 @@ def main():
     connected = False
 
     def on_connect(client, userdata, flags, rc, properties):
-        nonlocal connected
+        nonlocal connected, last_env_publish, last_sys_fast_publish
+        nonlocal last_sys_mid_publish, last_sys_slow_publish
         if rc == 0:
             connected = True
+            # Force immediate publish on reconnect
+            last_env_publish = 0.0
+            last_sys_fast_publish = 0.0
+            last_sys_mid_publish = 0.0
+            last_sys_slow_publish = 0.0
             print(f"Connected to MQTT broker {MQTT_BROKER}", file=sys.stderr)
             # Publish discovery configs (retained)
             for topic, payload in discovery_configs(hostname):
@@ -478,7 +485,9 @@ def main():
                     client.publish(env_topic, json.dumps({"illuminance": lux}))
 
             # --- System fast: accel + backlight (2s) ---
+            publish_sys = False
             if now - last_sys_fast_publish >= SYS_FAST_INTERVAL:
+                publish_sys = True
                 last_sys_fast_publish = now
 
                 backlight = read_backlight()
@@ -520,8 +529,8 @@ def main():
                 if uptime is not None:
                     sys_state["uptime"] = uptime
 
-            # --- Publish merged system state on fastest interval ---
-            if (now - last_sys_fast_publish < 0.1) and sys_state and connected:
+            # --- Publish merged system state ---
+            if publish_sys and sys_state and connected:
                 client.publish(sys_topic, json.dumps(sys_state))
 
             # --- Sleep until next poll ---
