@@ -382,6 +382,8 @@ def deploy_kiosk_files(rootfs: Path) -> None:
         "backlight-manager.service": ("/etc/systemd/system/", None, 0o644),
         "power-button-handler": ("/usr/local/bin/", None, 0o755),
         "power-button-handler.service": ("/etc/systemd/system/", None, 0o644),
+        "mqtt-sensors": ("/usr/local/bin/", None, 0o755),
+        "mqtt-sensors.service": ("/etc/systemd/system/", None, 0o644),
     }
 
     for source_name, (target_dir, target_name, mode) in file_map.items():
@@ -495,6 +497,7 @@ def enable_services(rootfs: Path) -> None:
         "cage-kiosk@tty7",
         "backlight-manager",
         "power-button-handler",
+        "mqtt-sensors",
         "seatd",
     ]
     mask = ["serial-getty@ttyGS0"]
