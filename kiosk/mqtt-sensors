@@ -355,3 +355,191 @@ def discovery_configs(hostname):
         ))
 
     return configs
+
+
+def main():
+    import paho.mqtt.client as mqtt
+
+    hostname = get_hostname()
+    avail_topic = f"reterminal/{hostname}/availability"
+    env_topic = f"reterminal/{hostname}/environment/state"
+    sys_topic = f"reterminal/{hostname}/system/state"
+    button_topic = f"reterminal/{hostname}/button/event"
+
+    print(f"MQTT sensor publisher starting for {hostname}", file=sys.stderr)
+
+    # --- MQTT setup ---
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=hostname)
+    client.will_set(avail_topic, "offline", qos=1, retain=True)
+
+    connected = False
+
+    def on_connect(client, userdata, flags, rc, properties):
+        nonlocal connected
+        if rc == 0:
+            connected = True
+            print(f"Connected to MQTT broker {MQTT_BROKER}", file=sys.stderr)
+            # Publish discovery configs (retained)
+            for topic, payload in discovery_configs(hostname):
+                client.publish(topic, json.dumps(payload), qos=1, retain=True)
+            # Announce online
+            client.publish(avail_topic, "online", qos=1, retain=True)
+            sys.stderr.flush()
+        else:
+            print(f"MQTT connect failed: rc={rc}", file=sys.stderr)
+            sys.stderr.flush()
+
+    def on_disconnect(client, userdata, flags, rc, properties):
+        nonlocal connected
+        connected = False
+        print(f"MQTT disconnected: rc={rc}", file=sys.stderr)
+        sys.stderr.flush()
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.connect_async(MQTT_BROKER, MQTT_PORT)
+    client.loop_start()
+
+    # --- Signal handling ---
+    running = True
+
+    def handle_signal(signum, frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    # --- Button device ---
+    button_path = find_gpio_keys_device()
+    button_fd = None
+    if button_path:
+        try:
+            button_fd = os.open(button_path, os.O_RDONLY | os.O_NONBLOCK)
+            print(f"  Buttons: {button_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"  Buttons: failed to open {button_path}: {e}", file=sys.stderr)
+    else:
+        print("  Buttons: gpio_keys not found", file=sys.stderr)
+    sys.stderr.flush()
+
+    # --- State ---
+    prev_accel = None
+    vibration_until = 0.0
+    last_env_publish = 0.0
+    last_sys_slow_publish = 0.0  # for uptime (60s)
+    last_sys_fast_publish = 0.0  # for accel/backlight (2s)
+    last_sys_mid_publish = 0.0   # for CPU temp/WiFi (10s)
+
+    ENV_INTERVAL = 2.0
+    SYS_FAST_INTERVAL = 2.0
+    SYS_MID_INTERVAL = 10.0
+    SYS_SLOW_INTERVAL = 60.0
+
+    # Cache for system state (merge fast/mid/slow readings)
+    sys_state = {}
+
+    try:
+        while running:
+            now = time.monotonic()
+
+            # --- Drain button events ---
+            if button_fd is not None:
+                try:
+                    readable, _, _ = select.select([button_fd], [], [], 0)
+                    if readable:
+                        while True:
+                            try:
+                                data = os.read(button_fd, EVENT_SIZE)
+                                if len(data) < EVENT_SIZE:
+                                    break
+                                _, _, ev_type, ev_code, ev_value = struct.unpack(
+                                    EVENT_FORMAT, data
+                                )
+                                if ev_type == EV_KEY and ev_value == 1:
+                                    key_name = KEY_MAP.get(ev_code)
+                                    if key_name and connected:
+                                        client.publish(button_topic, key_name)
+                                        print(
+                                            f"Button: {key_name} (code={ev_code})",
+                                            file=sys.stderr,
+                                        )
+                                        sys.stderr.flush()
+                            except BlockingIOError:
+                                break
+                except (OSError, ValueError):
+                    pass
+
+            # --- Environment (2s) ---
+            if now - last_env_publish >= ENV_INTERVAL:
+                last_env_publish = now
+                lux = read_illuminance()
+                if lux is not None and connected:
+                    client.publish(env_topic, json.dumps({"illuminance": lux}))
+
+            # --- System fast: accel + backlight (2s) ---
+            if now - last_sys_fast_publish >= SYS_FAST_INTERVAL:
+                last_sys_fast_publish = now
+
+                backlight = read_backlight()
+                if backlight is not None:
+                    sys_state["backlight"] = backlight
+                    sys_state["screen"] = "ON" if backlight > 0 else "OFF"
+
+                accel = read_accelerometer()
+                if accel is not None:
+                    sys_state["accel_x"] = accel[0]
+                    sys_state["accel_y"] = accel[1]
+                    sys_state["accel_z"] = accel[2]
+                    sys_state["orientation"] = compute_orientation(*accel)
+                    sys_state["tilt_angle"] = compute_tilt_angle(*accel)
+
+                    if detect_vibration(prev_accel, accel):
+                        vibration_until = now + VIBRATION_HOLD_S
+                    prev_accel = accel
+
+                sys_state["vibration"] = "ON" if now < vibration_until else "OFF"
+
+            # --- System mid: CPU temp + WiFi (10s) ---
+            if now - last_sys_mid_publish >= SYS_MID_INTERVAL:
+                last_sys_mid_publish = now
+
+                cpu_temp = read_cpu_temperature()
+                if cpu_temp is not None:
+                    sys_state["cpu_temperature"] = cpu_temp
+
+                rssi = read_wifi_rssi()
+                if rssi is not None:
+                    sys_state["wifi_rssi"] = rssi
+
+            # --- System slow: uptime (60s) ---
+            if now - last_sys_slow_publish >= SYS_SLOW_INTERVAL:
+                last_sys_slow_publish = now
+
+                uptime = read_uptime()
+                if uptime is not None:
+                    sys_state["uptime"] = uptime
+
+            # --- Publish merged system state on fastest interval ---
+            if (now - last_sys_fast_publish < 0.1) and sys_state and connected:
+                client.publish(sys_topic, json.dumps(sys_state))
+
+            # --- Sleep until next poll ---
+            if button_fd is not None:
+                select.select([button_fd], [], [], SYS_FAST_INTERVAL)
+            else:
+                time.sleep(SYS_FAST_INTERVAL)
+
+    finally:
+        if connected:
+            client.publish(avail_topic, "offline", qos=1, retain=True)
+            time.sleep(0.5)  # let the message send
+        client.loop_stop()
+        client.disconnect()
+        if button_fd is not None:
+            os.close(button_fd)
+        print("MQTT sensor publisher stopped", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
