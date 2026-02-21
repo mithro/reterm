@@ -3,6 +3,7 @@ Description=Cage Kiosk Browser on %I
 After=systemd-user-sessions.service
 After=seatd.service
 Requires=seatd.service
+Conflicts=getty@%i.service
 
 [Service]
 User=tim
@@ -25,6 +26,7 @@ ExecStartPre=+/bin/chown tim:tim /run/user/1000
 ExecStartPre=+/bin/chmod 0700 /run/user/1000
 ExecStartPre=-/bin/rm -f /run/user/1000/wayland-0 /run/user/1000/wayland-0.lock
 ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-browser
+ExecStartPost=+/bin/chvt 7
 
 KillSignal=SIGKILL
 Restart=on-failure

@@ -500,7 +500,7 @@ def enable_services(rootfs: Path) -> None:
         "mqtt-sensors",
         "seatd",
     ]
-    mask = ["serial-getty@ttyGS0"]
+    mask = ["serial-getty@ttyGS0", "getty@tty1"]
 
     for svc in enable:
         subprocess.run(
