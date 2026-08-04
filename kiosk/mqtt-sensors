@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """MQTT sensor publisher for reTerminal.
 
+DEPRECATED: superseded by https://github.com/mithro/sensors2mqtt — managed
+devices run its sensors2mqtt-local service instead (deployed by the owner's
+ansible fleet repo). This script stays in images only for a basic
+out-of-the-box experience on unmanaged devices.
+
 Reads sensors (light, accelerometer, CPU temp, WiFi, backlight, buttons)
 and publishes to Home Assistant via MQTT auto-discovery.
 """
