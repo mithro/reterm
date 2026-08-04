@@ -206,3 +206,23 @@ sudo journalctl -u cage-kiosk@tty7 -f
 sudo journalctl -u backlight-manager -f
 sudo journalctl -u power-button-handler -f
 ```
+
+## Kernel Pin: Stay on 6.12.x
+
+The Seeed DKMS modules (`bq24179_charger`, `ltr30x`) fail to build against
+kernel 6.18+ — the kernel removed `struct power_supply_config.of_node`
+(callers use fwnode now) — which makes dpkg fail to configure the 6.18.x
+kernel packages and leaves the display/battery stack broken. Until the Seeed
+drivers are fixed upstream, pin the kernel meta-packages
+(`linux-image-rpi-v8`, `linux-headers-rpi-v8`, and the 6.18.* versioned
+packages) to `Pin-Priority: -1` so apt and unattended-upgrades never install
+them. A device already on 6.18.x needs a one-time purge of those packages
+before the pin takes effect.
+
+## Fleet Management Note
+
+On devices under fleet management, `/usr/local/bin/kiosk-browser` is
+regenerated ("Ansible managed" header) by the owner's private ansible repo —
+the flash-time URL injection applies only until first converge. That repo
+also declares the kernel pin above and deploys sensors2mqtt (superseding the
+deprecated `kiosk/mqtt-sensors`).
